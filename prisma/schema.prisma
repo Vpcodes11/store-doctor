@@ -1,0 +1,135 @@
+// Prisma schema for StoreDoctor
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Audit {
+  id              String      @id @default(uuid())
+  url             String
+  canonicalUrl    String
+  storeName       String      @default("Shopify Store")
+  score           Int         @default(0)
+  grade           String      @default("C")
+  desktopShot     String?
+  mobileShot      String?
+  screenshots     String      @default("[]") // JSON string array of captured page screenshots
+  psiData         String      @default("{}") // JSON string of PageSpeed Insights & Core Web Vitals
+  findingsData    String      @default("[]") // JSON string summary of all findings
+  categoryScores  String      @default("{}") // JSON string of breakdown scores
+  email           String?
+  ipAddress       String?
+  paid            Boolean     @default(false)
+  heroRewrites    String?     // JSON of AI hero copy alternatives
+  productRewrites String?     // JSON of AI product description alternatives
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  findings        Finding[]
+  fixOrders       FixOrder[]
+  orders          Order[]
+
+  @@index([canonicalUrl])
+  @@index([createdAt])
+  @@index([ipAddress])
+}
+
+model Finding {
+  id            String   @id @default(uuid())
+  auditId       String
+  category      String   // Speed & Mobile, First Impression, Trust, Product Page, Pricing & Offers, Checkout Friction, SEO
+  severity      String   // critical, high, medium, low
+  impact        Int      @default(3) // 1-5
+  ease          Int      @default(3) // 1-5
+  priorityScore Int      @default(9) // impact * ease
+  title         String
+  explanation   String   // "Why it matters"
+  fixSteps      String   // JSON array of step-by-step instructions or markdown string
+  screenshotBox String   @default("{}") // JSON: { page: 'desktop'|'mobile'|'product', x: number, y: number, width: number, height: number, label: string }
+  pageType      String   @default("homepage") // homepage, collection, product, cart
+  createdAt     DateTime @default(now())
+
+  audit         Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  fixTasks      FixTask[]
+
+  @@index([auditId])
+}
+
+model FixOrder {
+  id                String    @id @default(uuid())
+  auditId           String
+  customerEmail     String
+  customerName      String?
+  storeUrl          String
+  collaboratorCode  String?
+  packageType       String    @default("fix_pack") // fix_pack ($149 / ₹9,999)
+  amountPaid        Float     @default(149.0)
+  currency          String    @default("USD")
+  status            String    @default("pending") // pending, in_progress, review, completed
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  audit             Audit     @relation(fields: [auditId], references: [id])
+  tasks             FixTask[]
+
+  @@index([auditId])
+  @@index([customerEmail])
+}
+
+model FixTask {
+  id               String    @id @default(uuid())
+  fixOrderId       String
+  findingId        String?
+  title            String
+  category         String
+  impact           Int       @default(3)
+  ease             Int       @default(3)
+  status           String    @default("pending") // pending, in_progress, completed
+  assignedTo       String?
+  beforeScreenshot String?
+  afterScreenshot  String?
+  developerNotes   String?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  fixOrder         FixOrder  @relation(fields: [fixOrderId], references: [id], onDelete: Cascade)
+  finding          Finding?  @relation(fields: [findingId], references: [id])
+
+  @@index([fixOrderId])
+}
+
+model Order {
+  id            String   @id @default(uuid())
+  auditId       String
+  email         String
+  productType   String   // full_report, fix_pack, monthly_reaudit
+  amount        Float
+  currency      String   @default("USD")
+  status        String   @default("completed") // pending, completed, failed
+  paymentId     String?
+  paymentMethod String?  // card, upi, netbanking, test_instant
+  createdAt     DateTime @default(now())
+
+  audit         Audit    @relation(fields: [auditId], references: [id])
+
+  @@index([auditId])
+  @@index([email])
+}
+
+model RateLimit {
+  id        String   @id @default(uuid())
+  key       String   @unique // ip:xxx or email:xxx
+  count     Int      @default(1)
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
