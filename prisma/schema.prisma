@@ -5,8 +5,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Audit {
@@ -16,8 +17,10 @@ model Audit {
   storeName       String      @default("Shopify Store")
   score           Int         @default(0)
   grade           String      @default("C")
+  /// Screenshots from PageSpeed Insights, stored as data: URIs
   desktopShot     String?
   mobileShot      String?
+  productShot     String?
   screenshots     String      @default("[]") // JSON string array of captured page screenshots
   psiData         String      @default("{}") // JSON string of PageSpeed Insights & Core Web Vitals
   findingsData    String      @default("[]") // JSON string summary of all findings
@@ -109,12 +112,16 @@ model Order {
   id            String   @id @default(uuid())
   auditId       String
   email         String
-  productType   String   // full_report, fix_pack, monthly_reaudit
+  productType   String   // full_report, fix_pack
   amount        Float
   currency      String   @default("USD")
-  status        String   @default("completed") // pending, completed, failed
-  paymentId     String?
-  paymentMethod String?  // card, upi, netbanking, test_instant
+  status        String   @default("pending") // pending, completed, failed
+  /// Dodo Payments payment id, set when the payment succeeds (unique: fulfilled once)
+  paymentId     String?  @unique
+  paymentMethod String?
+  customerName  String?
+  collaboratorCode String?
+  notes         String?
   createdAt     DateTime @default(now())
 
   audit         Audit    @relation(fields: [auditId], references: [id])
@@ -132,4 +139,11 @@ model RateLimit {
   updatedAt DateTime @updatedAt
 
   @@index([key])
+}
+
+/// Dodo webhook deliveries already processed
+model WebhookEvent {
+  id        String   @id
+  type      String
+  createdAt DateTime @default(now())
 }

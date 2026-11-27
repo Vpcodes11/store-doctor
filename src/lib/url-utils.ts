@@ -10,6 +10,10 @@ export function normalizeUrl(rawUrl: string): { url: string; canonical: string; 
     if (hostname.startsWith('www.')) {
       hostname = hostname.slice(4);
     }
+    // The server fetches this address: only public hostnames.
+    if (!hostname.includes('.') || /^\d+(\.\d+){3}$/.test(hostname) || hostname.includes(':') || /(^|\.)(localhost|local|internal)$/.test(hostname)) {
+      throw new Error('Invalid URL');
+    }
 
     const canonical = `${parsed.protocol}//${hostname}`;
     // Normalized URL with trailing slash removed unless root

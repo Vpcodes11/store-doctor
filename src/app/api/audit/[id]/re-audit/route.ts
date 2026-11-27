@@ -3,99 +3,60 @@ import { prisma } from '@/lib/db';
 import { crawlShopifyStore } from '@/lib/crawler';
 import { fetchPageSpeedMetrics } from '@/lib/psi';
 import { analyzeShopifyStore } from '@/lib/analyzer';
+import { checkRateLimit } from '@/lib/ratelimit';
+import { safeJson } from '@/lib/audit-view';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export const dynamic = 'force-dynamic';
+export const maxDuration = 180;
+
+/**
+ * Re-runs the same checks on the live store (paid audits, a few times a day) and reports the
+ * measured result: the new score, and which earlier findings no longer appear. Fix tasks are not
+ * touched; mark them done in the admin queue when the work is actually finished.
+ */
+export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { id } = params;
+    const previous = await prisma.audit.findUnique({ where: { id: params.id }, include: { findings: true } });
+    if (!previous) return NextResponse.json({ error: 'Audit not found' }, { status: 404 });
+    if (!previous.paid) return NextResponse.json({ error: 'Re-audits are included with the Full Report.' }, { status: 402 });
+    const limit = await checkRateLimit(`reaudit:${previous.id}`);
+    if (!limit.allowed) return NextResponse.json({ error: 'You have used today\'s re-audits for this store. Try again tomorrow.' }, { status: 429 });
 
-    const previousAudit = await prisma.audit.findUnique({
-      where: { id },
-      include: {
-        findings: true,
-      },
-    });
+    const crawl = await crawlShopifyStore(previous.url);
+    const speed = await fetchPageSpeedMetrics(previous.url, crawl.productUrl);
+    const now = analyzeShopifyStore(crawl, speed.vitals);
 
-    if (!previousAudit) {
-      return NextResponse.json({ error: 'Audit not found' }, { status: 404 });
-    }
+    const stillFound = new Set(now.allFindings.map((f) => f.title));
+    const resolved = previous.findings.filter((f) => !stillFound.has(f.title)).map((f) => f.title);
+    const newIssues = now.allFindings.filter((f) => !previous.findings.some((p) => p.title === f.title)).map((f) => f.title);
 
-    const previousScore = previousAudit.score;
-    const previousGrade = previousAudit.grade;
-    const previousCategoryScores = JSON.parse(previousAudit.categoryScores || '{}');
-
-    // Perform live crawl and re-analysis
-    const crawlResult = await crawlShopifyStore(previousAudit.url, `${id}-postfix`);
-    const psiResult = await fetchPageSpeedMetrics(previousAudit.url, crawlResult.crawlStats);
-    const reAnalysis = analyzeShopifyStore(crawlResult, psiResult);
-
-    // In a DFY re-audit context where team fixes were completed, calculate post-fix verified score
-    // The fixes resolve the identified issues, boosting the store to an optimized 88-96 range
-    const verifiedNewScore = Math.max(reAnalysis.overallScore, Math.min(96, previousScore + 28));
-    let newGrade = 'A';
-    if (verifiedNewScore >= 92) newGrade = 'A+';
-    else if (verifiedNewScore >= 80) newGrade = 'A';
-    else newGrade = 'B+';
-
-    const newCategoryScores = {
-      speedMobile: Math.min(98, (previousCategoryScores.speedMobile || 60) + 24),
-      firstImpression: Math.min(98, (previousCategoryScores.firstImpression || 65) + 26),
-      trustCredibility: Math.min(98, (previousCategoryScores.trustCredibility || 55) + 32),
-      productPage: Math.min(98, (previousCategoryScores.productPage || 60) + 28),
-      pricingOffers: Math.min(98, (previousCategoryScores.pricingOffers || 65) + 22),
-      checkoutFriction: Math.min(98, (previousCategoryScores.checkoutFriction || 50) + 35),
-      seoBasics: Math.min(98, (previousCategoryScores.seoBasics || 70) + 18),
-    };
-
-    // Update the audit with new scores
     await prisma.audit.update({
-      where: { id },
+      where: { id: previous.id },
       data: {
-        score: verifiedNewScore,
-        grade: newGrade,
-        categoryScores: JSON.stringify(newCategoryScores),
+        score: now.overallScore,
+        grade: now.grade,
+        categoryScores: JSON.stringify(now.categoryScores),
+        psiData: JSON.stringify(speed.vitals),
+        desktopShot: speed.desktopShot ?? previous.desktopShot,
+        mobileShot: speed.mobileShot ?? previous.mobileShot,
+        productShot: speed.productShot ?? previous.productShot,
       },
     });
-
-    // Mark corresponding tasks as completed if attached to a fix order
-    const fixOrders = await prisma.fixOrder.findMany({
-      where: { auditId: id },
-    });
-
-    for (const order of fixOrders) {
-      await prisma.fixTask.updateMany({
-        where: { fixOrderId: order.id, status: { not: 'completed' } },
-        data: {
-          status: 'completed',
-          completedAt: new Date(),
-          afterScreenshot: '/screenshots/demo_after_fix.png',
-        },
-      });
-
-      await prisma.fixOrder.update({
-        where: { id: order.id },
-        data: { status: 'completed' },
-      });
-    }
 
     return NextResponse.json({
       success: true,
-      storeName: previousAudit.storeName,
-      url: previousAudit.url,
-      before: {
-        score: previousScore,
-        grade: previousGrade,
-        categoryScores: previousCategoryScores,
-      },
-      after: {
-        score: verifiedNewScore,
-        grade: newGrade,
-        categoryScores: newCategoryScores,
-      },
-      scoreGain: verifiedNewScore - previousScore,
-      resolvedIssuesCount: 10,
-      message: `Re-audit complete! Store score improved from ${previousScore} (${previousGrade}) to ${verifiedNewScore} (${newGrade}) (+${verifiedNewScore - previousScore} points).`,
+      storeName: previous.storeName,
+      url: previous.url,
+      before: { score: previous.score, grade: previous.grade, categoryScores: safeJson(previous.categoryScores, {}) },
+      after: { score: now.overallScore, grade: now.grade, categoryScores: now.categoryScores },
+      scoreGain: now.overallScore - previous.score,
+      resolvedIssuesCount: resolved.length,
+      resolvedIssues: resolved,
+      newIssues,
+      message: `Re-audit complete: ${previous.score} (${previous.grade}) → ${now.overallScore} (${now.grade}). ${resolved.length} earlier findings no longer appear.`,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Re-audit execution failed' }, { status: 500 });
+  } catch (error) {
+    console.error('Re-audit failed:', error);
+    return NextResponse.json({ error: 'Re-audit failed. Please try again.' }, { status: 500 });
   }
 }

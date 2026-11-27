@@ -59,6 +59,7 @@ interface AuditData {
   desktopShot: string;
   mobileShot: string;
   paid: boolean;
+  /** null when PageSpeed Insights could not test the store */
   psiData: {
     performanceScore: number;
     lcp: number;
@@ -67,11 +68,10 @@ interface AuditData {
     tbt: number;
     speedIndex: number;
     totalByteWeight: number;
-    thirdPartyScriptsCount: number;
-    isSimulated?: boolean;
-  };
+    thirdPartyScriptsCount: number | null;
+  } | null;
   categoryScores: {
-    speedMobile: number;
+    speedMobile: number | null;
     firstImpression: number;
     trustCredibility: number;
     productPage: number;
@@ -359,6 +359,7 @@ export default function AuditDetailPage() {
               </span>
               <span className="text-[10px] text-slate-500 font-mono">PSI Telemetry</span>
             </div>
+            {audit.psiData ? (
             <div className="grid grid-cols-2 gap-3 text-xs mb-3">
               <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
                 <span className="text-slate-500 block text-[10px]">Largest Contentful (LCP)</span>
@@ -377,15 +378,18 @@ export default function AuditDetailPage() {
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-slate-500 block text-[10px]">App Scripts</span>
-                <span className={`font-bold ${audit.psiData.thirdPartyScriptsCount > 20 ? 'text-amber-400' : 'text-white'}`}>
-                  {audit.psiData.thirdPartyScriptsCount} tags
+                <span className="text-slate-500 block text-[10px]">Third-party services</span>
+                <span className={`font-bold ${(audit.psiData.thirdPartyScriptsCount ?? 0) > 10 ? 'text-amber-400' : 'text-white'}`}>
+                  {audit.psiData.thirdPartyScriptsCount ?? 'n/a'}
                 </span>
               </div>
             </div>
+            ) : (
+              <p className="text-xs text-slate-400 mb-3">Google PageSpeed Insights could not test this store, so speed is not scored. Try a re-audit later.</p>
+            )}
           </div>
           <span className="text-[10px] text-slate-500">
-            {audit.psiData.thirdPartyScriptsCount > 20 ? '⚠️ High script overhead detected from third-party apps' : '✓ Script execution within safe thresholds'}
+            {audit.psiData ? `Measured by Google PageSpeed Insights (mobile). Performance score ${audit.psiData.performanceScore}/100.` : 'Speed data unavailable'}
           </span>
         </div>
       </div>
@@ -408,14 +412,14 @@ export default function AuditDetailPage() {
             <div key={cat.key} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80">
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-slate-300 font-medium">{cat.label}</span>
-                <span className={`font-bold ${cat.score >= 75 ? 'text-emerald-400' : cat.score >= 55 ? 'text-amber-400' : 'text-rose-400'}`}>
-                  {cat.score}/100
+                <span className={`font-bold ${cat.score === null ? 'text-slate-500' : cat.score >= 75 ? 'text-emerald-400' : cat.score >= 55 ? 'text-amber-400' : 'text-rose-400'}`}>
+                  {cat.score === null ? 'n/a' : `${cat.score}/100`}
                 </span>
               </div>
               <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${cat.score >= 75 ? 'bg-emerald-400' : cat.score >= 55 ? 'bg-amber-400' : 'bg-rose-400'}`}
-                  style={{ width: `${cat.score}%` }}
+                  className={`h-full rounded-full ${(cat.score ?? 0) >= 75 ? 'bg-emerald-400' : (cat.score ?? 0) >= 55 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                  style={{ width: `${cat.score ?? 0}%` }}
                 />
               </div>
             </div>
