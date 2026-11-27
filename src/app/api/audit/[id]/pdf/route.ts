@@ -22,6 +22,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!audit) {
       return NextResponse.json({ error: 'Audit not found' }, { status: 404 });
     }
+    // The PDF contains every finding's fix steps: paid audits only.
+    if (!audit.paid) {
+      return NextResponse.json({ error: 'The PDF report is included with the Full Report.' }, { status: 402 });
+    }
 
     const categoryScores = JSON.parse(audit.categoryScores || '{}');
     const heroRewrites = audit.heroRewrites ? JSON.parse(audit.heroRewrites) : null;
@@ -47,7 +51,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       categoryScores,
       topIssues: parsedFindings.slice(0, 10),
       allFindings: parsedFindings,
-      revenueLeakageEstimate: `$${((100 - audit.score) * 140).toLocaleString()} - $${((100 - audit.score) * 420).toLocaleString()}/mo`,
     };
 
     let aiCopy: AICopyAnalysis | undefined;

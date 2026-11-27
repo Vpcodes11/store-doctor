@@ -1,7 +1,4 @@
-import { chromium, Browser, BrowserContext } from 'playwright';
 import * as cheerio from 'cheerio';
-import fs from 'fs';
-import path from 'path';
 
 export interface CrawlPageResult {
   url: string;
@@ -50,10 +47,12 @@ export interface CrawlPageResult {
 export interface CrawlStoreResult {
   targetUrl: string;
   storeName: string;
-  desktopScreenshot: string;
-  mobileScreenshot: string;
-  productDesktopScreenshot?: string;
-  productMobileScreenshot?: string;
+  /** Screenshots come from PageSpeed Insights (data: URIs); set after the crawl. */
+  desktopScreenshot?: string | null;
+  mobileScreenshot?: string | null;
+  productMobileScreenshot?: string | null;
+  /** First real product page found on the homepage, if any */
+  productUrl: string | null;
   pages: CrawlPageResult[];
   detectedApps: string[];
   crawlStats: {
@@ -84,12 +83,8 @@ const KNOWN_SHOPIFY_APPS: Record<string, RegExp> = {
   'Shopify Inbox': /shopify\.com\/shopify-chat/i,
 };
 
-export async function crawlShopifyStore(baseUrl: string, auditId: string): Promise<CrawlStoreResult> {
+export async function crawlShopifyStore(baseUrl: string): Promise<CrawlStoreResult> {
   const startTime = Date.now();
-  const screenshotDir = path.join(process.cwd(), 'public', 'screenshots', auditId);
-  if (!fs.existsSync(screenshotDir)) {
-    fs.mkdirSync(screenshotDir, { recursive: true });
-  }
 
   // 1. Initial discovery of pages using Cheerio & fast fetch
   const initialResp = await fetch(baseUrl, {
@@ -97,7 +92,11 @@ export async function crawlShopifyStore(baseUrl: string, auditId: string): Promi
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 StoreDoctor/1.0',
     },
+    signal: AbortSignal.timeout(20_000),
   });
+  if (!initialResp.ok) {
+    throw new Error(`We could not open ${baseUrl} (HTTP ${initialResp.status}). Check the address, or the store may be password-protected.`);
+  }
 
   const homeHtml = await initialResp.text();
   const responseTimeMs = Date.now() - startTime;
@@ -135,75 +134,11 @@ export async function crawlShopifyStore(baseUrl: string, auditId: string): Promi
 
   const detectedAppsSet = new Set<string>();
 
-  // Browser launch for Playwright captures
-  let browser: Browser | null = null;
-  let desktopScreenshotPath = `/screenshots/${auditId}/desktop.jpg`;
-  let mobileScreenshotPath = `/screenshots/${auditId}/mobile.jpg`;
-  let productDesktopPath = `/screenshots/${auditId}/product_desktop.jpg`;
-  let productMobilePath = `/screenshots/${auditId}/product_mobile.jpg`;
-
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
-    });
-
-    // Capture Desktop Homepage
-    const desktopContext = await browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    });
-    const desktopPage = await desktopContext.newPage();
-    await desktopPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await desktopPage.waitForTimeout(2000); // Allow lazy-loaded hero assets
-    const desktopFile = path.join(screenshotDir, 'desktop.jpg');
-    await desktopPage.screenshot({ path: desktopFile, quality: 80, type: 'jpeg' });
-    await desktopContext.close();
-
-    // Capture Mobile Homepage
-    const mobileContext = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-      isMobile: true,
-      hasTouch: true,
-      userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
-    });
-    const mobilePage = await mobileContext.newPage();
-    await mobilePage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await mobilePage.waitForTimeout(1500);
-    const mobileFile = path.join(screenshotDir, 'mobile.jpg');
-    await mobilePage.screenshot({ path: mobileFile, quality: 80, type: 'jpeg' });
-
-    // Capture Mobile Product Page if available
-    if (product1Url && product1Url !== baseUrl) {
-      try {
-        await mobilePage.goto(product1Url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await mobilePage.waitForTimeout(1500);
-        const prodMobileFile = path.join(screenshotDir, 'product_mobile.jpg');
-        await mobilePage.screenshot({ path: prodMobileFile, quality: 80, type: 'jpeg' });
-      } catch (e) {
-        console.warn('Failed capturing mobile product shot:', e);
-      }
-    }
-    await mobileContext.close();
-  } catch (browserErr) {
-    console.warn('Playwright execution encountered error or timeout, generating synthetic preview:', browserErr);
-    // Create placeholder/synthetic screenshots if headless fails
-    generateSyntheticScreenshot(path.join(screenshotDir, 'desktop.jpg'), 'desktop', baseUrl);
-    generateSyntheticScreenshot(path.join(screenshotDir, 'mobile.jpg'), 'mobile', baseUrl);
-    generateSyntheticScreenshot(path.join(screenshotDir, 'product_mobile.jpg'), 'product', baseUrl);
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
-  }
-
   // 2. Parse pages for in-depth CRO rules
   const pages: CrawlPageResult[] = [];
 
   // Parse Homepage
-  const homeParsed = parsePageHtml(homeHtml, baseUrl, 'homepage', desktopScreenshotPath, mobileScreenshotPath);
+  const homeParsed = parsePageHtml(homeHtml, baseUrl, 'homepage');
   pages.push(homeParsed);
   homeParsed.shopifyAppsDetected.forEach((app) => detectedAppsSet.add(app));
 
@@ -225,7 +160,7 @@ export async function crawlShopifyStore(baseUrl: string, auditId: string): Promi
     const p1Resp = await fetch(product1Url, { headers: { 'User-Agent': 'StoreDoctor/1.0' } });
     if (p1Resp.ok) {
       const p1Html = await p1Resp.text();
-      const p1Parsed = parsePageHtml(p1Html, product1Url, 'product', undefined, productMobilePath);
+      const p1Parsed = parsePageHtml(p1Html, product1Url, 'product');
       pages.push(p1Parsed);
       p1Parsed.shopifyAppsDetected.forEach((app) => detectedAppsSet.add(app));
     }
@@ -254,10 +189,7 @@ export async function crawlShopifyStore(baseUrl: string, auditId: string): Promi
   return {
     targetUrl: baseUrl,
     storeName,
-    desktopScreenshot: desktopScreenshotPath,
-    mobileScreenshot: mobileScreenshotPath,
-    productDesktopScreenshot: productDesktopPath,
-    productMobileScreenshot: productMobilePath,
+    productUrl: discoveredProducts[0] || null,
     pages,
     detectedApps: Array.from(detectedAppsSet),
     crawlStats: {
@@ -431,35 +363,4 @@ function parsePageHtml(
     productDetails,
     cartDetails,
   };
-}
-
-function generateSyntheticScreenshot(filePath: string, mode: 'desktop' | 'mobile' | 'product', url: string) {
-  // If screenshot creation fallback is required, write a high-resolution dark mock canvas placeholder
-  const width = mode === 'desktop' ? 1280 : 390;
-  const height = mode === 'desktop' ? 800 : 844;
-  const domain = new URL(url).hostname;
-
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#0f172a"/>
-        <stop offset="100%" stop-color="#1e293b"/>
-      </linearGradient>
-    </defs>
-    <rect width="${width}" height="${height}" fill="url(#bg)"/>
-    <rect x="${width * 0.05}" y="20" width="${width * 0.9}" height="50" rx="8" fill="#334155" opacity="0.6"/>
-    <text x="${width * 0.08}" y="52" fill="#94a3b8" font-family="sans-serif" font-size="14">${domain} • ${mode.toUpperCase()} PREVIEW</text>
-    <rect x="${width * 0.05}" y="90" width="${width * 0.9}" height="240" rx="12" fill="#1e293b" stroke="#334155" stroke-width="2"/>
-    <text x="${width * 0.08}" y="150" fill="#f8fafc" font-family="sans-serif" font-size="22" font-weight="bold">StoreDoctor Vision Capture</text>
-    <text x="${width * 0.08}" y="190" fill="#38bdf8" font-family="sans-serif" font-size="15">Loaded: ${url}</text>
-    <rect x="${width * 0.08}" y="220" width="160" height="40" rx="6" fill="#10b981"/>
-    <text x="${width * 0.08 + 25}" y="246" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold">Shop Now</text>
-    <circle cx="${width - 50}" cy="45" r="16" fill="#10b981" opacity="0.3"/>
-  </svg>`;
-
-  try {
-    fs.writeFileSync(filePath.replace(/\.jpg$/, '.svg'), svg);
-  } catch (err) {
-    console.error('Failed writing synthetic SVG:', err);
-  }
 }

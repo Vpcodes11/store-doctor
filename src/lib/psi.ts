@@ -1,94 +1,107 @@
+/**
+ * Google PageSpeed Insights (Lighthouse) results. Every number here is measured by PageSpeed;
+ * when PageSpeed can't test a page, the result is null and the report says speed data is
+ * unavailable. Nothing is estimated.
+ */
 export interface CoreWebVitals {
-  performanceScore: number; // 0-100
-  fcp: number; // in seconds (First Contentful Paint)
-  lcp: number; // in seconds (Largest Contentful Paint)
-  cls: number; // Cumulative Layout Shift
-  tbt: number; // in ms (Total Blocking Time)
-  speedIndex: number; // in seconds
-  inp?: number; // in ms (Interaction to Next Paint)
+  performanceScore: number; // 0-100, Lighthouse mobile performance score
+  fcp: number; // seconds
+  lcp: number; // seconds
+  cls: number;
+  tbt: number; // ms
+  speedIndex: number; // seconds
   totalByteWeight: number; // bytes
-  scriptByteWeight: number;
-  imageByteWeight: number;
-  thirdPartyScriptsCount: number;
-  isSimulated?: boolean;
+  scriptByteWeight: number | null;
+  imageByteWeight: number | null;
+  thirdPartyScriptsCount: number | null; // distinct third-party entities that loaded resources
 }
 
-export async function fetchPageSpeedMetrics(
-  targetUrl: string,
-  crawlStats?: { scriptCount: number; imageCount: number; htmlSizeBytes: number; responseTimeMs: number }
-): Promise<CoreWebVitals> {
-  const apiKey = process.env.PAGESPEED_API_KEY;
+export interface PageSpeedRun {
+  vitals: CoreWebVitals | null;
+  /** data:image/jpeg;base64,… screenshot of the page as Lighthouse rendered it */
+  screenshot: string | null;
+}
 
-  if (apiKey) {
-    try {
-      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
-        targetUrl
-      )}&strategy=mobile&category=performance&key=${apiKey}`;
+const PSI = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 
-      const res = await fetch(endpoint, { next: { revalidate: 3600 } });
-      if (res.ok) {
-        const data = await res.json();
-        const lighthouse = data.lighthouseResult;
-        const audits = lighthouse?.audits || {};
-        const categories = lighthouse?.categories || {};
-
-        const perfScore = Math.round((categories.performance?.score || 0.6) * 100);
-        const fcp = parseFloat((audits['first-contentful-paint']?.numericValue / 1000 || 1.8).toFixed(2));
-        const lcp = parseFloat((audits['largest-contentful-paint']?.numericValue / 1000 || 3.2).toFixed(2));
-        const cls = parseFloat((audits['cumulative-layout-shift']?.numericValue || 0.08).toFixed(3));
-        const tbt = Math.round(audits['total-blocking-time']?.numericValue || 350);
-        const speedIndex = parseFloat((audits['speed-index']?.numericValue / 1000 || 2.9).toFixed(2));
-        const totalByteWeight = Math.round(audits['total-byte-weight']?.numericValue || 2800000);
-
-        return {
-          performanceScore: perfScore,
-          fcp,
-          lcp,
-          cls,
-          tbt,
-          speedIndex,
-          totalByteWeight,
-          scriptByteWeight: Math.round(totalByteWeight * 0.45),
-          imageByteWeight: Math.round(totalByteWeight * 0.40),
-          thirdPartyScriptsCount: crawlStats?.scriptCount || 24,
-          isSimulated: false,
-        };
-      }
-    } catch (err) {
-      console.warn('PageSpeed Insights API request failed, using intelligent telemetry heuristics:', err);
+export async function runPageSpeed(targetUrl: string, strategy: 'mobile' | 'desktop'): Promise<PageSpeedRun> {
+  const params = new URLSearchParams({ url: targetUrl, strategy, category: 'performance' });
+  if (process.env.PAGESPEED_API_KEY) params.set('key', process.env.PAGESPEED_API_KEY);
+  try {
+    const res = await fetch(`${PSI}?${params}`, { cache: 'no-store', signal: AbortSignal.timeout(90_000) });
+    if (!res.ok) {
+      console.warn(`PageSpeed ${strategy} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return { vitals: null, screenshot: null };
     }
+    return parsePageSpeed(await res.json());
+  } catch (err) {
+    console.warn(`PageSpeed ${strategy} failed:`, (err as Error).message);
+    return { vitals: null, screenshot: null };
+  }
+}
+
+export function parsePageSpeed(data: any): PageSpeedRun {
+  const lh = data?.lighthouseResult;
+  const audits = lh?.audits || {};
+  const shot = audits['final-screenshot']?.details?.data;
+  const screenshot = typeof shot === 'string' && shot.startsWith('data:image/') ? shot : null;
+
+  const num = (id: string) => {
+    const v = audits[id]?.numericValue;
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const score = lh?.categories?.performance?.score;
+  const fcp = num('first-contentful-paint');
+  const lcp = num('largest-contentful-paint');
+  const cls = num('cumulative-layout-shift');
+  const tbt = num('total-blocking-time');
+  const si = num('speed-index');
+  const bytes = num('total-byte-weight');
+  // Without the core metrics there is nothing trustworthy to report.
+  if (typeof score !== 'number' || fcp === null || lcp === null || cls === null || tbt === null || si === null || bytes === null) {
+    return { vitals: null, screenshot };
   }
 
-  // Intelligent fallback estimation based on Shopify store payload telemetry
-  const scripts = crawlStats?.scriptCount || 28;
-  const images = crawlStats?.imageCount || 18;
-  const respTime = crawlStats?.responseTimeMs || 450;
-  const htmlSize = crawlStats?.htmlSizeBytes || 120000;
-
-  // Base mobile performance score degraded by excessive Shopify app scripts and heavy assets
-  let score = 78;
-  if (scripts > 25) score -= Math.min(22, (scripts - 25) * 1.5);
-  if (images > 20) score -= Math.min(15, (images - 20) * 0.8);
-  if (respTime > 600) score -= Math.min(18, ((respTime - 600) / 100) * 2.5);
-  score = Math.max(28, Math.min(94, Math.round(score)));
-
-  const estimatedLcp = parseFloat((2.1 + (scripts * 0.06) + (respTime / 1000 * 0.8)).toFixed(2));
-  const estimatedFcp = parseFloat((1.2 + (respTime / 1000 * 0.5)).toFixed(2));
-  const estimatedCls = parseFloat((0.04 + (images > 15 ? 0.08 : 0.02)).toFixed(3));
-  const estimatedTbt = Math.round(180 + (scripts * 12));
-  const estimatedTotalBytes = htmlSize + (scripts * 65000) + (images * 140000);
+  const summary: Array<{ resourceType?: string; transferSize?: number }> = audits['resource-summary']?.details?.items || [];
+  const sizeOf = (type: string) => {
+    const item = summary.find((i) => i.resourceType === type);
+    return typeof item?.transferSize === 'number' ? Math.round(item.transferSize) : null;
+  };
+  const thirdParty = audits['third-party-summary']?.details?.items;
 
   return {
-    performanceScore: score,
-    fcp: estimatedFcp,
-    lcp: estimatedLcp,
-    cls: estimatedCls,
-    tbt: estimatedTbt,
-    speedIndex: parseFloat((estimatedFcp * 1.4).toFixed(2)),
-    totalByteWeight: estimatedTotalBytes,
-    scriptByteWeight: Math.round(scripts * 65000),
-    imageByteWeight: Math.round(images * 140000),
-    thirdPartyScriptsCount: scripts,
-    isSimulated: true,
+    screenshot,
+    vitals: {
+      performanceScore: Math.round(score * 100),
+      fcp: round(fcp / 1000, 2),
+      lcp: round(lcp / 1000, 2),
+      cls: round(cls, 3),
+      tbt: Math.round(tbt),
+      speedIndex: round(si / 1000, 2),
+      totalByteWeight: Math.round(bytes),
+      scriptByteWeight: sizeOf('script'),
+      imageByteWeight: sizeOf('image'),
+      thirdPartyScriptsCount: Array.isArray(thirdParty) ? thirdParty.length : null,
+    },
+  };
+}
+
+const round = (n: number, d: number) => Number(n.toFixed(d));
+
+/**
+ * Homepage on mobile (the metrics + mobile screenshot), homepage on desktop (desktop screenshot)
+ * and the first product page on mobile (product screenshot), all in parallel.
+ */
+export async function fetchPageSpeedMetrics(homeUrl: string, productUrl?: string | null) {
+  const [mobile, desktop, product] = await Promise.all([
+    runPageSpeed(homeUrl, 'mobile'),
+    runPageSpeed(homeUrl, 'desktop'),
+    productUrl ? runPageSpeed(productUrl, 'mobile') : Promise.resolve<PageSpeedRun>({ vitals: null, screenshot: null }),
+  ]);
+  return {
+    vitals: mobile.vitals,
+    mobileShot: mobile.screenshot,
+    desktopShot: desktop.screenshot,
+    productShot: product.screenshot,
   };
 }

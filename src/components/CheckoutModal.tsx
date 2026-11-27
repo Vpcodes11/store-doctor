@@ -13,14 +13,13 @@ import {
   ArrowRight,
   Clock,
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   auditId: string;
   storeName: string;
-  initialProductType?: 'full_report' | 'fix_pack' | 'monthly_reaudit';
+  initialProductType?: 'full_report' | 'fix_pack';
   onSuccess: () => void;
 }
 
@@ -32,7 +31,7 @@ export default function CheckoutModal({
   initialProductType = 'full_report',
   onSuccess,
 }: Props) {
-  const [productType, setProductType] = useState<'full_report' | 'fix_pack' | 'monthly_reaudit'>(
+  const [productType, setProductType] = useState<'full_report' | 'fix_pack'>(
     initialProductType
   );
   const [currency, setCurrency] = useState<'USD' | 'INR'>('USD');
@@ -52,7 +51,7 @@ export default function CheckoutModal({
     if (productType === 'fix_pack') {
       return currency === 'INR' ? '₹9,999' : '$149';
     }
-    return currency === 'INR' ? '₹1,199/mo' : '$15/mo';
+    return '';
   };
 
   const handleCheckout = async (e: React.FormEvent) => {
@@ -81,21 +80,12 @@ export default function CheckoutModal({
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Payment processing failed');
+      if (!res.ok || !data.checkoutUrl) {
+        throw new Error(data.error || 'We could not open the checkout. Please try again.');
       }
-
-      // Trigger celebratory confetti
-      try {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-        });
-      } catch {}
-
-      onSuccess();
-      onClose();
+      // Secure payment page (Dodo Payments). Access unlocks after the payment succeeds.
+      window.location.href = data.checkoutUrl;
+      return;
     } catch (err: any) {
       setError(err?.message || 'Failed to complete order. Please try again.');
     } finally {

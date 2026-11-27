@@ -193,36 +193,8 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Social Proof Avatars & Trust Pill */}
+        {/* Trust pill */}
         <div className="flex flex-wrap items-center justify-center gap-6 pt-4 text-xs text-slate-400">
-          <div className="flex items-center space-x-2">
-            <div className="flex -space-x-2">
-              {[
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=64&h=64&fit=crop&crop=face',
-                'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=64&h=64&fit=crop&crop=face',
-                'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=64&h=64&fit=crop&crop=face',
-                'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=64&h=64&fit=crop&crop=face',
-              ].map((src, i) => (
-                <img
-                  key={i}
-                  src={src}
-                  alt="Shopify Founder"
-                  className="w-7 h-7 rounded-full border-2 border-slate-900 object-cover"
-                />
-              ))}
-            </div>
-            <div className="text-left leading-tight pl-1">
-              <div className="flex text-amber-400 text-[11px]">
-                {'★★★★★'}
-              </div>
-              <span className="text-[11px] text-slate-300 font-semibold">
-                4.9/5 from 2,840+ Shopify brands
-              </span>
-            </div>
-          </div>
-
-          <span className="hidden sm:inline text-slate-700">•</span>
-
           <span className="flex items-center gap-1.5 font-medium text-slate-300">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             No Shopify login or password required
@@ -298,7 +270,7 @@ export default function HomePage() {
                     <span className="text-[10px] font-black uppercase text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/20">
                       Hero Section A/B Test
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-bold">+18% Lift</span>
+                    <span className="text-[10px] text-emerald-400 font-bold">Example</span>
                   </div>
                   <p className="text-xs text-white font-bold leading-tight">
                     {activeInteractiveTab === 'after'
@@ -542,7 +514,7 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="text-slate-300 text-sm leading-relaxed mb-8">
-              Book our Done-For-You Fix Pack ($149 / ₹9,999). Our specialized Shopify engineers code, test, and deploy all 10 fixes directly via Shopify collaborator access. Includes official before/after verification re-audit.
+              Book our Done-For-You Fix Pack ($149 / ₹9,999). We code, test and deploy the top 10 fixes through Shopify collaborator access, then re-run the audit so you can see the measured before and after.
             </p>
 
             <div className="flex flex-wrap items-center gap-4">
@@ -553,102 +525,11 @@ export default function HomePage() {
                 <Wrench className="w-4 h-4" />
                 <span>Explore Done-For-You Pack</span>
               </a>
-              <Link
-                href="/admin"
-                className="px-5 py-3.5 rounded-full font-semibold text-xs text-slate-300 hover:text-white glass-pill transition-colors flex items-center gap-1.5"
-              >
-                <span>View Live Admin Fix Queue</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Pinterest-Grade Curated Brand Testimonials */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 mb-32">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <span className="text-xs font-bold uppercase tracking-widest text-emerald-400 mb-2 block">
-            Results That Matter
-          </span>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-            Loved by fast-scaling Shopify founders.
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Review 1 */}
-          <div className="p-6 rounded-3xl glass-card flex flex-col justify-between">
-            <div>
-              <div className="flex items-center space-x-1 text-amber-400 text-xs mb-4">
-                {'★★★★★'}
-              </div>
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-6">
-                “StoreDoctor caught 4 redundant Klaviyo and popup scripts that were choking our mobile checkout by 4.1 seconds. Fixing those top 3 alone lifted our conversion rate from 1.9% to 2.8% within two weeks.”
-              </p>
-            </div>
-            <div className="flex items-center space-x-3 pt-4 border-t border-white/5">
-              <img
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=96&h=96&fit=crop&crop=face"
-                alt="Sarah L."
-                className="w-10 h-10 rounded-full object-cover border border-white/20"
-              />
-              <div>
-                <span className="text-xs font-bold text-white block">Sarah Lin</span>
-                <span className="text-[11px] text-slate-400">Founder, Aura Skincare ($2.4M ARR)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Review 2 */}
-          <div className="p-6 rounded-3xl glass-card flex flex-col justify-between border-emerald-500/20">
-            <div>
-              <div className="flex items-center space-x-1 text-amber-400 text-xs mb-4">
-                {'★★★★★'}
-              </div>
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-6">
-                “The Indian COD and fast-checkout recommendations paid for themselves on day one. Having the sticky Add-To-Cart button on mobile and clear return badges eliminated our cart bounce.”
-              </p>
-            </div>
-            <div className="flex items-center space-x-3 pt-4 border-t border-white/5">
-              <img
-                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=96&h=96&fit=crop&crop=face"
-                alt="Rohan M."
-                className="w-10 h-10 rounded-full object-cover border border-white/20"
-              />
-              <div>
-                <span className="text-xs font-bold text-white block">Rohan Mehta</span>
-                <span className="text-[11px] text-slate-400">Head of Growth, UrbanCraft D2C</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Review 3 */}
-          <div className="p-6 rounded-3xl glass-card flex flex-col justify-between">
-            <div>
-              <div className="flex items-center space-x-1 text-amber-400 text-xs mb-4">
-                {'★★★★★'}
-              </div>
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-6">
-                “The DFY Fix Pack is the best $149 we spent this quarter. Their team took the collaborator code, executed all 10 theme changes cleanly, and our score jumped from 61 to 93 in 48 hours.”
-              </p>
-            </div>
-            <div className="flex items-center space-x-3 pt-4 border-t border-white/5">
-              <img
-                src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=96&h=96&fit=crop&crop=face"
-                alt="Elena K."
-                className="w-10 h-10 rounded-full object-cover border border-white/20"
-              />
-              <div>
-                <span className="text-xs font-bold text-white block">Elena K.</span>
-                <span className="text-[11px] text-slate-400">Co-founder, Vesper Footwear</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
       <section id="pricing" className="max-w-6xl mx-auto px-4 sm:px-6 mb-32">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <div className="inline-flex rounded-full glass-pill p-1 border border-white/10 text-xs mb-6">
@@ -774,7 +655,7 @@ export default function HomePage() {
                 {pricingCurrency === 'INR' ? '₹9,999' : '$149'}
               </div>
               <p className="text-xs text-slate-400 mb-6">
-                Our Shopify engineers implement all Top 10 fixes in 48 hours.
+                We implement the top 10 fixes within 48 hours of getting collaborator access.
               </p>
               <ul className="space-y-3 text-xs text-slate-300 mb-8">
                 <li className="flex items-center gap-2">
@@ -787,11 +668,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-4 h-4 text-teal-400 shrink-0" />
-                  <span>Official Post-Fix Re-Audit verifying score gain</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-teal-400 shrink-0" />
-                  <span>Monthly Re-audit add-on ($15/mo)</span>
+                  <span>Post-fix re-audit showing the measured before and after</span>
                 </li>
               </ul>
             </div>

@@ -7,114 +7,75 @@ import { fetchPageSpeedMetrics } from '@/lib/psi';
 import { analyzeShopifyStore } from '@/lib/analyzer';
 import { generateAICopyRewrites } from '@/lib/ai-service';
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { url, email, forceRefresh } = body;
+export const dynamic = 'force-dynamic';
+// PageSpeed runs three Lighthouse tests in parallel (~20-60s) before the analysis.
+export const maxDuration = 180;
 
+/** Runs a full audit and returns its id; the audit page loads it through GET /api/audit/:id. */
+export async function POST(req: NextRequest) {
+  let auditId: string | null = null;
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { url, email, forceRefresh } = body as { url?: string; email?: string; forceRefresh?: boolean };
     if (!url || typeof url !== 'string') {
       return NextResponse.json({ error: 'Please provide a valid Shopify store URL.' }, { status: 400 });
     }
 
-    const { url: cleanUrl, canonical, hostname } = normalizeUrl(url);
+    let normalized;
+    try {
+      normalized = normalizeUrl(url);
+    } catch {
+      return NextResponse.json({ error: 'Please provide a valid Shopify store URL.' }, { status: 400 });
+    }
+    const { url: cleanUrl, canonical, hostname } = normalized;
+    const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || req.headers.get('x-real-ip') || 'unknown';
 
-    // IP address extraction
-    const forwarded = req.headers.get('x-forwarded-for');
-    const ip = forwarded ? forwarded.split(',')[0].trim() : '127.0.0.1';
-    const rateLimitIdentifier = email || ip;
-
-    // Check 24-hour cache unless forced
+    // Same store audited in the last 24h: reuse it.
     if (!forceRefresh) {
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const cached = await prisma.audit.findFirst({
-        where: {
-          canonicalUrl: canonical,
-          createdAt: { gte: twentyFourHoursAgo },
-        },
-        include: {
-          findings: {
-            orderBy: { priorityScore: 'desc' },
-          },
-        },
+        where: { canonicalUrl: canonical, createdAt: { gte: new Date(Date.now() - 24 * 3600_000) }, score: { gt: 0 } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
       });
-
-      if (cached) {
-        return NextResponse.json({
-          auditId: cached.id,
-          cached: true,
-          message: 'Retrieved 24h cached audit.',
-          data: {
-            id: cached.id,
-            url: cached.url,
-            storeName: cached.storeName,
-            score: cached.score,
-            grade: cached.grade,
-            desktopShot: cached.desktopShot,
-            mobileShot: cached.mobileShot,
-            paid: cached.paid,
-            psiData: JSON.parse(cached.psiData || '{}'),
-            categoryScores: JSON.parse(cached.categoryScores || '{}'),
-            topIssues: cached.findings.slice(0, 10),
-            allFindings: cached.findings,
-            heroRewrites: cached.heroRewrites ? JSON.parse(cached.heroRewrites) : null,
-            productRewrites: cached.productRewrites ? JSON.parse(cached.productRewrites) : null,
-            createdAt: cached.createdAt,
-          },
-        });
-      }
+      if (cached) return NextResponse.json({ auditId: cached.id, cached: true });
     }
 
-    // Rate limit check for fresh audit
-    const rateCheck = await checkRateLimit(rateLimitIdentifier);
+    // Limit by IP (a typed email is not proof of anything).
+    const rateCheck = await checkRateLimit(`ip:${ip}`);
     if (!rateCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: rateCheck.reason,
-          rateLimitExceeded: true,
-          resetAt: rateCheck.resetAt,
-        },
-        { status: 429 }
-      );
+      return NextResponse.json({ error: rateCheck.reason, rateLimitExceeded: true, resetAt: rateCheck.resetAt }, { status: 429 });
     }
 
-    // Generate new Audit ID
     const auditRecord = await prisma.audit.create({
       data: {
         url: cleanUrl,
         canonicalUrl: canonical,
         storeName: extractStoreName(hostname),
         ipAddress: ip,
-        email: email || null,
+        email: typeof email === 'string' && email.includes('@') ? email.trim().slice(0, 254) : null,
       },
     });
+    auditId = auditRecord.id;
 
-    const auditId = auditRecord.id;
-
-    // 1. Crawl Store Pages and capture screenshots
-    const crawlResult = await crawlShopifyStore(cleanUrl, auditId);
-
-    // 2. Fetch Core Web Vitals via PageSpeed Insights API or telemetry
-    const psiResult = await fetchPageSpeedMetrics(cleanUrl, crawlResult.crawlStats);
-
-    // 3. Analyze Store with 35+ CRO rules
-    const analysis = analyzeShopifyStore(crawlResult, psiResult);
-
-    // 4. Generate AI Copy Rewrites (Hero & Product Page)
+    // 1. Read the store's pages (HTML only).
+    const crawlResult = await crawlShopifyStore(cleanUrl);
+    // 2. Measured speed data + real screenshots from PageSpeed Insights.
+    const speed = await fetchPageSpeedMetrics(cleanUrl, crawlResult.productUrl);
+    crawlResult.desktopScreenshot = speed.desktopShot;
+    crawlResult.mobileScreenshot = speed.mobileShot;
+    crawlResult.productMobileScreenshot = speed.productShot;
+    // 3. Rule checks.
+    const analysis = analyzeShopifyStore(crawlResult, speed.vitals);
+    // 4. AI copy suggestions (none if AI is unavailable).
     const homePage = crawlResult.pages.find((p) => p.type === 'homepage');
     const prodPage = crawlResult.pages.find((p) => p.type === 'product');
-    const aiCopy = await generateAICopyRewrites(
-      crawlResult.storeName,
-      homePage?.h1[0],
-      undefined,
-      prodPage?.title
-    );
+    const aiCopy = await generateAICopyRewrites(crawlResult.storeName, homePage?.h1[0], undefined, prodPage?.title);
 
-    // 5. Store findings in database
-    await prisma.$transaction(
-      analysis.allFindings.map((finding) =>
+    await prisma.$transaction([
+      ...analysis.allFindings.map((finding) =>
         prisma.finding.create({
           data: {
-            auditId,
+            auditId: auditId!,
             category: finding.category,
             severity: finding.severity,
             impact: finding.impact,
@@ -126,73 +87,32 @@ export async function POST(req: NextRequest) {
             screenshotBox: JSON.stringify(finding.screenshotBox),
             pageType: finding.pageType,
           },
-        })
-      )
-    );
-
-    // 6. Update the Audit record
-    const updatedAudit = await prisma.audit.update({
-      where: { id: auditId },
-      data: {
-        storeName: crawlResult.storeName,
-        score: analysis.overallScore,
-        grade: analysis.grade,
-        desktopShot: crawlResult.desktopScreenshot,
-        mobileShot: crawlResult.mobileScreenshot,
-        screenshots: JSON.stringify([
-          crawlResult.desktopScreenshot,
-          crawlResult.mobileScreenshot,
-          crawlResult.productDesktopScreenshot,
-          crawlResult.productMobileScreenshot,
-        ].filter(Boolean)),
-        psiData: JSON.stringify(psiResult),
-        findingsData: JSON.stringify(analysis.allFindings),
-        categoryScores: JSON.stringify(analysis.categoryScores),
-        heroRewrites: JSON.stringify(aiCopy.heroRewrites),
-        productRewrites: JSON.stringify(aiCopy.productRewrite),
-      },
-      include: {
-        findings: {
-          orderBy: { priorityScore: 'desc' },
+        }),
+      ),
+      prisma.audit.update({
+        where: { id: auditId },
+        data: {
+          storeName: crawlResult.storeName,
+          score: analysis.overallScore,
+          grade: analysis.grade,
+          desktopShot: speed.desktopShot,
+          mobileShot: speed.mobileShot,
+          productShot: speed.productShot,
+          psiData: JSON.stringify(speed.vitals),
+          findingsData: JSON.stringify(analysis.allFindings.map((f) => f.title)),
+          categoryScores: JSON.stringify(analysis.categoryScores),
+          heroRewrites: aiCopy ? JSON.stringify(aiCopy.heroRewrites) : null,
+          productRewrites: aiCopy ? JSON.stringify(aiCopy.productRewrite) : null,
         },
-      },
-    });
+      }),
+    ]);
 
-    return NextResponse.json({
-      auditId,
-      cached: false,
-      data: {
-        id: updatedAudit.id,
-        url: updatedAudit.url,
-        storeName: updatedAudit.storeName,
-        score: updatedAudit.score,
-        grade: updatedAudit.grade,
-        desktopShot: updatedAudit.desktopShot,
-        mobileShot: updatedAudit.mobileShot,
-        paid: updatedAudit.paid,
-        psiData: psiResult,
-        categoryScores: analysis.categoryScores,
-        revenueLeakageEstimate: analysis.revenueLeakageEstimate,
-        topIssues: updatedAudit.findings.slice(0, 10).map((f) => ({
-          ...f,
-          fixSteps: JSON.parse(f.fixSteps || '[]'),
-          screenshotBox: JSON.parse(f.screenshotBox || '{}'),
-        })),
-        allFindings: updatedAudit.findings.map((f) => ({
-          ...f,
-          fixSteps: JSON.parse(f.fixSteps || '[]'),
-          screenshotBox: JSON.parse(f.screenshotBox || '{}'),
-        })),
-        heroRewrites: aiCopy.heroRewrites,
-        productRewrites: aiCopy.productRewrite,
-        createdAt: updatedAudit.createdAt,
-      },
-    });
-  } catch (error: any) {
+    return NextResponse.json({ auditId, cached: false });
+  } catch (error) {
     console.error('Audit generation failed:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to complete store audit. Please verify the URL and try again.' },
-      { status: 500 }
-    );
+    // Don't leave a half-finished audit that the 24h cache would serve.
+    if (auditId) await prisma.audit.delete({ where: { id: auditId } }).catch(() => {});
+    const message = error instanceof Error && error.message.startsWith('We could not open') ? error.message : 'Failed to complete the store audit. Please check the URL and try again.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -8,12 +8,12 @@ Paste any Shopify store URL without credentials or login, and instantly receive 
 
 ## ⚡ Key Highlights
 
-1. **Zero-Login Crawler (Playwright + Cheerio)**:
+1. **Zero-Login Crawler (fetch + Cheerio)**:
    - Discovers Homepage, Collections (`/collections/*`), Products (`/products/*`), and Cart (`/cart`).
-   - Headless Playwright captures high-resolution Desktop (`1280x800`) and Mobile (`390x844`) viewport screenshots.
-   - Measures asset weights, image counts, and 15+ third-party Shopify app signatures (Judge.me, Loox, Klaviyo, Privy, GoKwik, etc.).
-2. **PageSpeed Insights & Core Web Vitals**:
-   - Analyzes Largest Contentful Paint (LCP), First Contentful Paint (FCP), Cumulative Layout Shift (CLS), Total Blocking Time (TBT), and third-party script bloat.
+   - Detects 15+ third-party Shopify apps (Judge.me, Loox, Klaviyo, Privy, GoKwik, etc.).
+2. **Google PageSpeed Insights (measured, never estimated)**:
+   - LCP, FCP, CLS, TBT, page weight and third-party services from Lighthouse, plus the real mobile, desktop and product-page screenshots.
+   - If PageSpeed can't test a store, the report says speed data is unavailable instead of guessing.
 3. **35+ CRO Rules Engine across 7 Core Categories**:
    - **Speed & Mobile Experience**: LCP thresholds, layout shifts, unoptimized images, app script bloat.
    - **First Impression & Hero Clarity**: Above-the-fold value proposition, headline contrast, primary CTA visibility.
@@ -29,14 +29,13 @@ Paste any Shopify store URL without credentials or login, and instantly receive 
    - **Free ($0)**: Health score (0-100), Grade (A+ to F), 7 category sub-scores, and Top 3 prioritized issues.
    - **Full Report ($29 / ₹1,999)**: Unlocks all 10+ prioritized fixes, AI direct-response copy rewrites (3 Hero variants + Product transformation script), and instant downloadable branded PDF report.
    - **Done-For-You Fix Pack ($149 / ₹9,999)**: Seller books 10 fixes implemented by Shopify developers in 48h; includes collaborator code intake, admin task tracking, and official post-fix re-audit.
-   - **Monthly Re-Audit ($15/mo / ₹1,199/mo)**: Recurring automated monitoring and alerting.
 6. **Built-in 24h Cache & Rate Limiting**:
    - Caches audits for the same canonical URL for 24 hours (instant sub-20ms retrieval).
-   - Rate limits free audits to 5 requests per 24 hours per IP/email.
+   - Rate limits free audits per IP address.
 
 ---
 
-## 🗄️ Database Architecture (Prisma & SQLite)
+## 🗄️ Database Architecture (Prisma & PostgreSQL)
 
 - **`audits`**: `id`, `url`, `canonicalUrl`, `storeName`, `score`, `grade`, `desktopShot`, `mobileShot`, `screenshots` (JSON array), `psiData` (JSON), `findingsData` (JSON), `categoryScores` (JSON), `email`, `ipAddress`, `paid`, `heroRewrites` (JSON), `productRewrites` (JSON).
 - **`findings`**: `id`, `auditId`, `category`, `severity`, `impact`, `ease`, `priorityScore`, `title`, `explanation`, `fixSteps`, `screenshotBox` (JSON `{ page, x, y, width, height, label }`), `pageType`.
@@ -47,48 +46,23 @@ Paste any Shopify store URL without credentials or login, and instantly receive 
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Deploy (Vercel + Neon)
 
-### 1. Prerequisites
-- Node.js 18+ (tested on Node.js v26 LTS)
-- npm or pnpm
+1. Import the repo into Vercel. Project → Storage → create a **Neon (Postgres)** database (sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`).
+2. Add the settings from `.env.example` (Project → Settings → Environment Variables).
+3. **Dodo Payments**: create two one-time products (Full Report $29, Fix Pack $149; optional ₹1,999 / ₹9,999 versions), put their IDs in `DODO_PRODUCT_*`, and add a webhook to `https://YOUR-DOMAIN/api/webhooks/dodo` for `payment.succeeded`.
+4. Deploy. The build applies the database migrations.
+5. Open `https://YOUR-DOMAIN/api/health?key=YOUR_HEALTH_KEY` to see any missing settings.
+6. The fix queue is at `/admin` (password: `ADMIN_PASSWORD`, any username).
 
-### 2. Installation
+## 💻 Local development
+
 ```bash
-# Clone or navigate to the project directory
-cd "Store Doctor"
-
-# Install dependencies
 npm install
-
-# Initialize Prisma SQLite database
-npx prisma db push
-```
-
-### 3. Environment Variables
-Create a `.env` file in the project root:
-```env
-DATABASE_URL="file:./dev.db"
-NEXT_PUBLIC_APP_URL="http://localhost:3008"
-
-# Optional: Google PageSpeed Insights API Key
-PAGESPEED_API_KEY=""
-
-# Optional: Gemini API Key for Vision & Copywriting AI (StoreDoctor uses built-in CRO synthesis when unset)
-GEMINI_API_KEY=""
-```
-
-### 4. Running the Application
-```bash
-# Start development server
+cp .env.example .env    # set DATABASE_URL to any Postgres
+npx prisma migrate dev
 npm run dev
-
-# Or build and run production server
-npm run build
-npm start -- -p 3008
 ```
-
-Visit `http://localhost:3008` in your browser.
 
 ---
 

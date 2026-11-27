@@ -94,14 +94,9 @@ export function generateAuditPdf(
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `Estimated Monthly Revenue Leakage: ${analysis.revenueLeakageEstimate}`,
-    58,
-    yPos + 22
-  );
-  doc.text(
     `Prioritized Issues Identified: ${analysis.allFindings.length} conversion roadblocks`,
     58,
-    yPos + 28
+    yPos + 22
   );
 
   // Category Breakdown Table
@@ -112,7 +107,7 @@ export function generateAuditPdf(
   doc.text('1. Category Health Breakdown', 14, yPos);
 
   const tableData = [
-    ['Speed & Mobile Performance', `${analysis.categoryScores.speedMobile}/100`, analysis.categoryScores.speedMobile >= 70 ? 'Optimal' : 'Needs Optimization'],
+    ['Speed & Mobile Performance', analysis.categoryScores.speedMobile === null ? 'n/a' : `${analysis.categoryScores.speedMobile}/100`, analysis.categoryScores.speedMobile === null ? 'PageSpeed data unavailable' : analysis.categoryScores.speedMobile >= 70 ? 'Optimal' : 'Needs Optimization'],
     ['First Impression & Hero Clarity', `${analysis.categoryScores.firstImpression}/100`, analysis.categoryScores.firstImpression >= 70 ? 'Strong' : 'Action Required'],
     ['Trust, Reviews & Credibility', `${analysis.categoryScores.trustCredibility}/100`, analysis.categoryScores.trustCredibility >= 70 ? 'Solid' : 'High Friction'],
     ['Product Page Optimization', `${analysis.categoryScores.productPage}/100`, analysis.categoryScores.productPage >= 70 ? 'Good' : 'Conversion Leak'],
@@ -155,7 +150,7 @@ export function generateAuditPdf(
   doc.setFontSize(8.5);
   doc.setTextColor(51, 65, 85);
   doc.text(
-    `Your store currently leaves an estimated ${analysis.revenueLeakageEstimate} in unrealized sales each month due to friction in mobile speed, trust guarantees, and checkout abandonment. Executing the top 10 fixes outlined below will immediately improve both conversion rate and customer acquisition efficiency (ROAS).`,
+    `The findings below are ranked by expected impact and ease. Work through the top 10 first: they cover the friction points in speed, trust and checkout that most often stop visitors from buying.`,
     18,
     finalY + 14,
     { maxWidth: pageWidth - 36 }

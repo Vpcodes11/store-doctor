@@ -26,7 +26,8 @@ export interface AuditAnalysisResult {
   overallScore: number;
   grade: string;
   categoryScores: {
-    speedMobile: number;
+    /** null when PageSpeed data was unavailable */
+    speedMobile: number | null;
     firstImpression: number;
     trustCredibility: number;
     productPage: number;
@@ -36,12 +37,11 @@ export interface AuditAnalysisResult {
   };
   topIssues: FindingItem[];
   allFindings: FindingItem[];
-  revenueLeakageEstimate: string;
 }
 
 export function analyzeShopifyStore(
   crawl: CrawlStoreResult,
-  psi: CoreWebVitals
+  psi: CoreWebVitals | null
 ): AuditAnalysisResult {
   const home = crawl.pages.find((p) => p.type === 'homepage') || crawl.pages[0];
   const product = crawl.pages.find((p) => p.type === 'product');
@@ -52,9 +52,10 @@ export function analyzeShopifyStore(
   // ==========================================
   // CATEGORY 1: Speed & Mobile Performance
   // ==========================================
-  let speedScore = psi.performanceScore;
+  // Speed is scored only from measured PageSpeed data. Without it the category is left out.
+  let speedScore = psi?.performanceScore ?? 0;
 
-  if (psi.lcp > 2.5) {
+  if (psi && psi.lcp > 2.5) {
     findings.push({
       id: 'speed-lcp-slow',
       category: 'Speed & Mobile',
@@ -83,7 +84,7 @@ export function analyzeShopifyStore(
     });
   }
 
-  if (psi.thirdPartyScriptsCount > 20) {
+  if (psi && psi.thirdPartyScriptsCount !== null && psi.thirdPartyScriptsCount > 10) {
     findings.push({
       id: 'speed-script-bloat',
       category: 'Speed & Mobile',
@@ -91,7 +92,7 @@ export function analyzeShopifyStore(
       impact: 4,
       ease: 4,
       priorityScore: 16,
-      title: `App Script Bloat: ${psi.thirdPartyScriptsCount} third-party scripts detected`,
+      title: `App Script Bloat: ${psi.thirdPartyScriptsCount} third-party services load code on your homepage`,
       explanation:
         'Accumulated Shopify apps (abandoned popups, uninstalled widgets) leave dangling JavaScript that severely blocks mobile CPU rendering and delays clicks.',
       fixSteps: [
@@ -106,13 +107,13 @@ export function analyzeShopifyStore(
         y: 88,
         width: 96,
         height: 10,
-        label: `${psi.thirdPartyScriptsCount} Tracking & App Scripts`,
+        label: `${psi.thirdPartyScriptsCount} third-party services`,
       },
       pageType: 'homepage',
     });
   }
 
-  if (psi.cls > 0.1) {
+  if (psi && psi.cls > 0.1) {
     findings.push({
       id: 'speed-layout-shift',
       category: 'Speed & Mobile',
@@ -645,7 +646,7 @@ export function analyzeShopifyStore(
 
   // Calculate final category scores (0-100)
   const categoryScores = {
-    speedMobile: Math.max(30, Math.min(98, Math.round(speedScore))),
+    speedMobile: psi ? Math.max(0, Math.min(100, Math.round(speedScore))) : null,
     firstImpression: Math.max(35, Math.min(98, Math.round(firstImpressionScore))),
     trustCredibility: Math.max(30, Math.min(98, Math.round(trustScore))),
     productPage: Math.max(35, Math.min(98, Math.round(productScore))),
@@ -654,7 +655,7 @@ export function analyzeShopifyStore(
     seoBasics: Math.max(40, Math.min(98, Math.round(seoScore))),
   };
 
-  const scoresList = Object.values(categoryScores);
+  const scoresList = Object.values(categoryScores).filter((v): v is number => typeof v === 'number');
   const overallScore = Math.round(
     scoresList.reduce((acc, curr) => acc + curr, 0) / scoresList.length
   );
@@ -667,18 +668,11 @@ export function analyzeShopifyStore(
   else if (overallScore >= 40) grade = 'D';
   else grade = 'F';
 
-  // Estimate revenue leakage based on missing score points
-  const pointsLost = 100 - overallScore;
-  const minLeakage = Math.round(pointsLost * 140);
-  const maxLeakage = Math.round(pointsLost * 420);
-  const revenueLeakageEstimate = `$${minLeakage.toLocaleString()} - $${maxLeakage.toLocaleString()}/mo`;
-
   return {
     overallScore,
     grade,
     categoryScores,
     topIssues: findings.slice(0, 10),
     allFindings: findings,
-    revenueLeakageEstimate,
   };
 }
